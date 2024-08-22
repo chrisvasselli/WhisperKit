@@ -98,6 +98,7 @@ struct ContentView: View {
     @State private var transcriptionTask: Task<Void, Never>? = nil
     @State private var selectedCategoryId: MenuItem.ID?
     @State private var transcribeFileTask: Task<Void, Never>? = nil
+    @State private var showLiveTranslationView: Bool = false
 
     struct MenuItem: Identifiable, Hashable {
         var id = UUID()
@@ -222,6 +223,11 @@ struct ContentView: View {
             selectedCategoryId = menu.first(where: { $0.name == selectedTab })?.id
             #endif
             fetchModels()
+        }
+        .sheet(isPresented: $showLiveTranslationView) {
+            if #available(macOS 15.0, *) {
+                LiveTranslationView(englishText: unconfirmedSegments.map { $0.text }.last ?? "")
+            }
         }
     }
 
@@ -1150,6 +1156,7 @@ struct ContentView: View {
 
     func toggleRecording(shouldLoop: Bool) {
         isRecording.toggle()
+        showLiveTranslationView = true
 
         if isRecording {
             resetState()
