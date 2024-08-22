@@ -31,6 +31,12 @@ extension Array where Element == Result<[TranscriptionResult], Swift.Error> {
     }
 }
 
+public extension Array where Element == TranscriptionSegment {
+    func contains(segment: TranscriptionSegment) -> Bool {
+        return self.contains { $0.start == segment.start }
+    }
+}
+
 extension MLMultiArray {
     /// Calculate the linear offset by summing the products of each dimension’s index with the dimension’s stride.
     /// More info [here](https://developer.apple.com/documentation/coreml/mlmultiarray/2879231-subscript)
@@ -149,14 +155,14 @@ public extension WhisperKit {
     }
 }
 
-extension Float {
+public extension Float {
     func rounded(_ decimalPlaces: Int) -> Float {
         let divisor = pow(10.0, Float(decimalPlaces))
         return (self * divisor).rounded() / divisor
     }
 }
 
-extension String {
+public extension String {
     var normalized: String {
         // Trim whitespace and newlines
         let trimmedString = self.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -178,6 +184,75 @@ extension String {
 
     func trimmingSpecialTokenCharacters() -> String {
         trimmingCharacters(in: Constants.specialTokenCharacters)
+    }
+}
+
+extension AVAudioPCMBuffer {
+    /// Appends the contents of another buffer to the current buffer
+    func appendContents(of buffer: AVAudioPCMBuffer) -> Bool {
+        return appendContents(of: buffer, startingFrame: 0, frameCount: buffer.frameLength)
+    }
+
+    /// Appends a specific range of frames from another buffer to the current buffer
+    func appendContents(of buffer: AVAudioPCMBuffer, startingFrame: AVAudioFramePosition, frameCount: AVAudioFrameCount) -> Bool {
+        guard format == buffer.format else {
+            Logging.debug("Format mismatch")
+            return false
+        }
+
+        guard startingFrame + AVAudioFramePosition(frameCount) <= AVAudioFramePosition(buffer.frameLength) else {
+            Logging.error("Insufficient audio in buffer")
+            return false
+        }
+
+        guard let destination = floatChannelData, let source = buffer.floatChannelData else {
+            Logging.error("Failed to access float channel data")
+            return false
+        }
+
+        var calculatedFrameCount = frameCount
+        if frameLength + frameCount > frameCapacity {
+            Logging.debug("Insufficient space in buffer, reducing frame count to fit")
+            calculatedFrameCount = frameCapacity - frameLength
+        }
+
+        let calculatedStride = stride
+        let destinationPointer = destination.pointee.advanced(by: calculatedStride * Int(frameLength))
+        let sourcePointer = source.pointee.advanced(by: calculatedStride * Int(startingFrame))
+
+        memcpy(destinationPointer, sourcePointer, Int(calculatedFrameCount) * calculatedStride * MemoryLayout<Float>.size)
+
+        frameLength += calculatedFrameCount
+        return true
+    }
+
+    /// Convenience initializer to concatenate multiple buffers into one
+    convenience init?(concatenating buffers: [AVAudioPCMBuffer]) {
+        guard !buffers.isEmpty else {
+            Logging.debug("Buffers array should not be empty")
+            return nil
+        }
+
+        let totalFrames = buffers.reduce(0) { $0 + $1.frameLength }
+
+        guard let firstBuffer = buffers.first else {
+            Logging.debug("Failed to get the first buffer")
+            return nil
+        }
+
+        self.init(pcmFormat: firstBuffer.format, frameCapacity: totalFrames)
+
+        for buffer in buffers {
+            if !appendContents(of: buffer) {
+                Logging.debug("Failed to append buffer")
+                return nil
+            }
+        }
+    }
+
+    /// Computed property to determine the stride for float channel data
+    private var stride: Int {
+        return Int(format.streamDescription.pointee.mBytesPerFrame) / MemoryLayout<Float>.size
     }
 }
 
@@ -408,6 +483,22 @@ public func modelSupport(for deviceName: String) -> (default: String, disabled: 
     return ("openai_whisper-base", [""])
 }
 
+public func detectModelURL(inFolder path: URL, named modelName: String) -> URL {
+    let compiledUrl = path.appending(path: "\(modelName).mlmodelc")
+    let packageUrl = path.appending(path: "\(modelName).mlpackage/Data/com.apple.CoreML/model.mlmodel")
+
+    let compiledModelExists: Bool = FileManager.default.fileExists(atPath: compiledUrl.path)
+    let packageModelExists: Bool = FileManager.default.fileExists(atPath: packageUrl.path)
+
+    // Swap to mlpackage only if the following is true: we found the mlmodel within the mlpackage, and we did not find a .mlmodelc
+    var modelURL = compiledUrl
+    if (packageModelExists && !compiledModelExists) {
+        modelURL = packageUrl
+    }
+
+    return modelURL
+}
+
 public func resolveAbsolutePath(_ inputPath: String) -> String {
     let fileManager = FileManager.default
 
@@ -547,6 +638,10 @@ public func mergeTranscriptionResults(_ results: [TranscriptionResult?], confirm
     // Update the merged timings with non-overlapping time values
     var mergedTimings = TranscriptionTimings(
         modelLoading: validResults.map { $0.timings.modelLoading }.max() ?? 0,
+        prewarmLoadTime: validResults.map { $0.timings.prewarmLoadTime }.max() ?? 0,
+        encoderLoadTime: validResults.map { $0.timings.encoderLoadTime }.max() ?? 0,
+        decoderLoadTime: validResults.map { $0.timings.decoderLoadTime }.max() ?? 0,
+        tokenizerLoadTime: validResults.map { $0.timings.tokenizerLoadTime }.max() ?? 0,
         audioLoading: validResults.map { $0.timings.audioLoading }.reduce(0, +),
         audioProcessing: validResults.map { $0.timings.audioProcessing }.reduce(0, +),
         logmels: validResults.map { $0.timings.logmels }.reduce(0, +),
@@ -666,6 +761,28 @@ public func compressionRatio(of text: String) -> Float {
     }
 }
 
+public func logCurrentMemoryUsage(_ message: String) {
+    let memoryUsage = getMemoryUsage()
+    Logging.debug("\(message) - Memory usage: \(memoryUsage) MB")
+}
+
+public func getMemoryUsage() -> UInt64 {
+    var info = mach_task_basic_info()
+    var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info>.size) / 4
+
+    let kerr: kern_return_t = withUnsafeMutablePointer(to: &info) {
+        $0.withMemoryRebound(to: integer_t.self, capacity: 1) {
+            task_info(mach_task_self_, task_flavor_t(MACH_TASK_BASIC_INFO), $0, &count)
+        }
+    }
+
+    guard kerr == KERN_SUCCESS else {
+        return 0 // If the call fails, return 0
+    }
+
+    return info.resident_size / 1024 / 1024 // Convert to MB
+}
+
 // MARK: - Singletons
 
 public class Logging {
@@ -674,6 +791,8 @@ public class Logging {
 
     public typealias LoggingCallback = (_ message: String) -> Void
     var loggingCallback: LoggingCallback?
+
+    private let logger = OSLog(subsystem: Bundle.main.bundleIdentifier ?? "com.argmax.whisperkit", category: "WhisperKit")
 
     public enum LogLevel: Int {
         case debug = 1
@@ -688,30 +807,30 @@ public class Logging {
 
     private init() {}
 
-    public func log(_ items: Any..., separator: String = " ", terminator: String = "\n") {
+    public func log(_ items: Any..., separator: String = " ", terminator: String = "\n", type: OSLogType) {
         let message = items.map { "\($0)" }.joined(separator: separator)
         if let logger = loggingCallback {
             logger(message)
         } else {
-            print("[WhisperKit] \(message)", terminator: terminator)
+            os_log("%{public}@", log: logger, type: type, message)
         }
     }
 
     public static func debug(_ items: Any..., separator: String = " ", terminator: String = "\n") {
         if shared.logLevel.shouldLog(level: .debug) {
-            shared.log(items, separator: separator, terminator: terminator)
+            shared.log(items, separator: separator, terminator: terminator, type: .debug)
         }
     }
 
     public static func info(_ items: Any..., separator: String = " ", terminator: String = "\n") {
         if shared.logLevel.shouldLog(level: .info) {
-            shared.log(items, separator: separator, terminator: terminator)
+            shared.log(items, separator: separator, terminator: terminator, type: .info)
         }
     }
 
     public static func error(_ items: Any..., separator: String = " ", terminator: String = "\n") {
         if shared.logLevel.shouldLog(level: .error) {
-            shared.log(items, separator: separator, terminator: terminator)
+            shared.log(items, separator: separator, terminator: terminator, type: .error)
         }
     }
 }

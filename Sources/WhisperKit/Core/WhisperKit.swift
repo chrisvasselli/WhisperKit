@@ -26,15 +26,15 @@ open class WhisperKit {
     public var segmentSeeker: any SegmentSeeking
 
     /// Shapes
-    public static var sampleRate: Int = 16000
-    public static var hopLength: Int = 160
-    public static var chunkLength: Int = 30 // seconds
-    public static var windowSamples: Int = 480_000 // sampleRate * chunkLength
-    public static var secondsPerTimeToken = Float(0.02)
+    public static let sampleRate: Int = 16000
+    public static let hopLength: Int = 160
+    public static let chunkLength: Int = 30 // seconds
+    public static let windowSamples: Int = 480_000 // sampleRate * chunkLength
+    public static let secondsPerTimeToken = Float(0.02)
 
     /// Progress
     public private(set) var currentTimings: TranscriptionTimings
-    public let progress = Progress()
+    public private(set) var progress = Progress()
 
     /// Configuration
     public var modelFolder: URL?
@@ -261,10 +261,11 @@ open class WhisperKit {
 
         Logging.debug("Loading models from \(path.path) with prewarmMode: \(prewarmMode)")
 
-        let logmelUrl = path.appending(path: "MelSpectrogram.mlmodelc")
-        let encoderUrl = path.appending(path: "AudioEncoder.mlmodelc")
-        let decoderUrl = path.appending(path: "TextDecoder.mlmodelc")
-        let decoderPrefillUrl = path.appending(path: "TextDecoderContextPrefill.mlmodelc")
+        // Find either mlmodelc or mlpackage models
+        let logmelUrl = detectModelURL(inFolder: path, named: "MelSpectrogram")
+        let encoderUrl = detectModelURL(inFolder: path, named: "AudioEncoder")
+        let decoderUrl = detectModelURL(inFolder: path, named: "TextDecoder")
+        let decoderPrefillUrl = detectModelURL(inFolder: path, named: "TextDecoderContextPrefill")
 
         for item in [logmelUrl, encoderUrl, decoderUrl] {
             if !FileManager.default.fileExists(atPath: item.path) {
@@ -282,26 +283,6 @@ open class WhisperKit {
             Logging.debug("Loaded feature extractor")
         }
 
-        if let audioEncoder = audioEncoder as? WhisperMLModel {
-            Logging.debug("Loading audio encoder")
-            try await audioEncoder.loadModel(
-                at: encoderUrl,
-                computeUnits: modelCompute.audioEncoderCompute,
-                prewarmMode: prewarmMode
-            )
-            Logging.debug("Loaded audio encoder")
-        }
-
-        if let textDecoder = textDecoder as? WhisperMLModel {
-            Logging.debug("Loading text decoder")
-            try await textDecoder.loadModel(
-                at: decoderUrl,
-                computeUnits: modelCompute.textDecoderCompute,
-                prewarmMode: prewarmMode
-            )
-            Logging.debug("Loaded text decoder")
-        }
-
         if FileManager.default.fileExists(atPath: decoderPrefillUrl.path) {
             Logging.debug("Loading text decoder prefill data")
             textDecoder.prefillData = TextDecoderContextPrefill()
@@ -313,9 +294,36 @@ open class WhisperKit {
             Logging.debug("Loaded text decoder prefill data")
         }
 
+        if let textDecoder = textDecoder as? WhisperMLModel {
+            Logging.debug("Loading text decoder")
+            let decoderLoadStart = CFAbsoluteTimeGetCurrent()
+            try await textDecoder.loadModel(
+                at: decoderUrl,
+                computeUnits: modelCompute.textDecoderCompute,
+                prewarmMode: prewarmMode
+            )
+            currentTimings.decoderLoadTime = CFAbsoluteTimeGetCurrent() - decoderLoadStart
+
+            Logging.debug("Loaded text decoder in \(String(format: "%.2f", currentTimings.decoderLoadTime))s")
+        }
+
+        if let audioEncoder = audioEncoder as? WhisperMLModel {
+            Logging.debug("Loading audio encoder")
+            let encoderLoadStart = CFAbsoluteTimeGetCurrent()
+
+            try await audioEncoder.loadModel(
+                at: encoderUrl,
+                computeUnits: modelCompute.audioEncoderCompute,
+                prewarmMode: prewarmMode
+            )
+            currentTimings.encoderLoadTime = CFAbsoluteTimeGetCurrent() - encoderLoadStart
+
+            Logging.debug("Loaded audio encoder in \(String(format: "%.2f", currentTimings.encoderLoadTime))s")
+        }
+
         if prewarmMode {
             modelState = .prewarmed
-            currentTimings.modelLoading = CFAbsoluteTimeGetCurrent() - modelLoadStart
+            currentTimings.prewarmLoadTime = CFAbsoluteTimeGetCurrent() - modelLoadStart
             return
         }
 
@@ -326,20 +334,24 @@ open class WhisperKit {
         textDecoder.isModelMultilingual = isModelMultilingual(logitsDim: logitsDim)
         modelVariant = detectVariant(logitsDim: logitsDim, encoderDim: encoderDim)
         Logging.debug("Loading tokenizer for \(modelVariant)")
+        let tokenizerLoadStart = CFAbsoluteTimeGetCurrent()
+
         let tokenizer = try await loadTokenizer(
             for: modelVariant,
             tokenizerFolder: tokenizerFolder,
             useBackgroundSession: useBackgroundDownloadSession
         )
+        currentTimings.tokenizerLoadTime = CFAbsoluteTimeGetCurrent() - tokenizerLoadStart
+
         self.tokenizer = tokenizer
         textDecoder.tokenizer = tokenizer
-        Logging.debug("Loaded tokenizer")
+        Logging.debug("Loaded tokenizer in \(String(format: "%.2f", currentTimings.tokenizerLoadTime))s")
 
         modelState = .loaded
 
-        currentTimings.modelLoading = CFAbsoluteTimeGetCurrent() - modelLoadStart
+        currentTimings.modelLoading = CFAbsoluteTimeGetCurrent() - modelLoadStart + currentTimings.prewarmLoadTime
 
-        Logging.info("Loaded models for whisper size: \(modelVariant)")
+        Logging.info("Loaded models for whisper size: \(modelVariant) in \(String(format: "%.2f", currentTimings.modelLoading))s")
     }
 
     public func unloadModels() async {
@@ -399,13 +411,13 @@ open class WhisperKit {
         guard textDecoder.isModelMultilingual else {
             throw WhisperError.decodingFailed("Language detection not supported for this model")
         }
-        
+
         // Tokenizer required for decoding
         guard let tokenizer else {
             throw WhisperError.tokenizerUnavailable()
         }
 
-        let options = DecodingOptions()
+        let options = DecodingOptions(verbose: Logging.shared.logLevel != .none)
         let decoderInputs = try textDecoder.prepareDecoderInputs(withPrompt: [tokenizer.specialTokens.startOfTranscriptToken])
         decoderInputs.kvCacheUpdateMask[0] = 1.0
         decoderInputs.decoderKeyPaddingMask[0] = 0.0
@@ -624,6 +636,7 @@ open class WhisperKit {
             // Append the results of each batch to the final result array
             result.append(contentsOf: partialResult)
         }
+
         return result
     }
 
@@ -767,25 +780,47 @@ open class WhisperKit {
             // Tokenizer required for decoding
             throw WhisperError.tokenizerUnavailable()
         }
-        try Task.checkCancellation()
+
+        let childProgress = Progress()
+        progress.totalUnitCount += 1
+        progress.addChild(childProgress, withPendingUnitCount: 1)
 
         let transcribeTask = TranscribeTask(
             currentTimings: currentTimings,
-            progress: progress,
+            progress: childProgress,
             audioEncoder: audioEncoder,
             featureExtractor: featureExtractor,
             segmentSeeker: segmentSeeker,
             textDecoder: textDecoder,
             tokenizer: tokenizer
         )
-        let transcribeTaskResult = try await transcribeTask.run(
-            audioArray: audioArray,
-            decodeOptions: decodeOptions,
-            callback: callback
-        )
-        if let decodeOptions, decodeOptions.verbose {
-            transcribeTaskResult.logTimings()
+
+        do {
+            try Task.checkCancellation()
+
+            let transcribeTaskResult = try await transcribeTask.run(
+                audioArray: audioArray,
+                decodeOptions: decodeOptions,
+                callback: callback
+            )
+
+            if let decodeOptions, decodeOptions.verbose {
+                transcribeTaskResult.logTimings()
+            }
+
+            if progress.isFinished {
+                // Reset progress if it is completed
+                progress = Progress()
+            }
+
+            return [transcribeTaskResult]
+        } catch {
+            // Handle cancellation
+            if error is CancellationError {
+                // Reset progress when cancelled
+                progress = Progress()
+            }
+            throw error
         }
-        return [transcribeTaskResult]
     }
 }
