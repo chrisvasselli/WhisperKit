@@ -26,6 +26,7 @@
 		1683EFEF2B9FADFE002448CD /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 1677AFB42B57618A008C61C0 /* Assets.xcassets */; };
 		1683EFF02B9FADFE002448CD /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 1677AFB62B57618A008C61C0 /* Preview Assets.xcassets */; };
 		16EA36CF2B59E550006CA7CF /* WhisperKit in Frameworks */ = {isa = PBXBuildFile; productRef = 16EA36CE2B59E550006CA7CF /* WhisperKit */; };
+		835B7F802C76E20500FB7F9C /* SubtitleOverlayWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 835B7F7F2C76E20100FB7F9C /* SubtitleOverlayWindow.swift */; };
 		8363FAE22C2FD41700DBFE43 /* LiveTranslationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8363FAE02C2FD41700DBFE43 /* LiveTranslationView.swift */; };
 		8363FAE32C2FD41700DBFE43 /* LiveTranslationViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8363FAE12C2FD41700DBFE43 /* LiveTranslationViewModel.swift */; };
 /* End PBXBuildFile section */
@@ -105,6 +106,7 @@
 		167B345E2B05431E0076F261 /* WhisperAX.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = WhisperAX.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		167B34712B05431F0076F261 /* WhisperAXTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = WhisperAXTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		167B347B2B05431F0076F261 /* WhisperAXUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = WhisperAXUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		835B7F7F2C76E20100FB7F9C /* SubtitleOverlayWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubtitleOverlayWindow.swift; sourceTree = "<group>"; };
 		8363FAE02C2FD41700DBFE43 /* LiveTranslationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveTranslationView.swift; sourceTree = "<group>"; };
 		8363FAE12C2FD41700DBFE43 /* LiveTranslationViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveTranslationViewModel.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -169,6 +171,7 @@
 		1677AFA82B57618A008C61C0 /* WhisperAX */ = {
 			isa = PBXGroup;
 			children = (
+				835B7F7F2C76E20100FB7F9C /* SubtitleOverlayWindow.swift */,
 				8363FAE02C2FD41700DBFE43 /* LiveTranslationView.swift */,
 				8363FAE12C2FD41700DBFE43 /* LiveTranslationViewModel.swift */,
 				1626683A2BB90CC9008F950A /* Info.plist */,
@@ -544,6 +547,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				1677AFE62B57704E008C61C0 /* ContentView.swift in Sources */,
+				835B7F802C76E20500FB7F9C /* SubtitleOverlayWindow.swift in Sources */,
 				8363FAE22C2FD41700DBFE43 /* LiveTranslationView.swift in Sources */,
 				8363FAE32C2FD41700DBFE43 /* LiveTranslationViewModel.swift in Sources */,
 				1677AFC22B57618A008C61C0 /* WhisperAXApp.swift in Sources */,
@@ -897,7 +901,7 @@
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
-				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MARKETING_VERSION = 0.3.1;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.serpentisei.WhisperAX--DEVELOPMENT-TEAM-";
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -943,7 +947,7 @@
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
-				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MARKETING_VERSION = 0.3.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.serpentisei.WhisperAX;
 				PRODUCT_NAME = "$(TARGET_NAME)";

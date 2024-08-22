@@ -3,11 +3,11 @@ import Speech
 import Translation
 import WhisperKit
 
-@available(macOS 15.0, *) 
 @Observable
 class LiveTranslationViewModel {
     var previousEnglishText: String?
     var previousJapaneseText: String?
+    var englishText: String?
     var japaneseText: String?
     var errorMessage: String?
         
@@ -25,6 +25,7 @@ class LiveTranslationViewModel {
         
     }
     
+    @available(macOS 15.0, *)
     func triggerTranslation() {
         if translationConfiguration == nil {
             // Set the language pairing.
@@ -36,6 +37,7 @@ class LiveTranslationViewModel {
         }
     }
     
+    @available(macOS 15.0, *)
     func translate(text: String, using session: TranslationSession) async {
         do {
             let response = try await session.translate(text)

@@ -13,25 +13,25 @@ import CoreML
 
 struct ContentView: View {
     @State var whisperKit: WhisperKit? = nil
-    #if os(macOS)
+#if os(macOS)
     @State var audioDevices: [AudioDevice]? = nil
-    #endif
+#endif
     @State var isRecording: Bool = false
     @State var isTranscribing: Bool = false
     @State var currentText: String = ""
     @State var currentChunks: [Int: (chunkText: [String], fallbacks: Int)] = [:]
     // TODO: Make this configurable in the UI
     @State var modelStorage: String = "huggingface/models/argmaxinc/whisperkit-coreml"
-
+    
     // MARK: Model management
-
+    
     @State private var modelState: ModelState = .unloaded
     @State private var localModels: [String] = []
     @State private var localModelPath: String = ""
     @State private var availableModels: [String] = []
     @State private var availableLanguages: [String] = []
     @State private var disabledModels: [String] = WhisperKit.recommendedModels().disabled
-
+    
     @AppStorage("selectedAudioInput") private var selectedAudioInput: String = "No Audio Input"
     @AppStorage("selectedModel") private var selectedModel: String = WhisperKit.recommendedModels().default
     @AppStorage("selectedTab") private var selectedTab: String = "Transcribe"
@@ -54,9 +54,9 @@ struct ContentView: View {
     @AppStorage("chunkingStrategy") private var chunkingStrategy: ChunkingStrategy = .none
     @AppStorage("encoderComputeUnits") private var encoderComputeUnits: MLComputeUnits = .cpuAndNeuralEngine
     @AppStorage("decoderComputeUnits") private var decoderComputeUnits: MLComputeUnits = .cpuAndNeuralEngine
-
+    
     // MARK: Standard properties
-
+    
     @State private var loadingProgressValue: Float = 0.0
     @State private var specializationProgressRatio: Float = 0.7
     @State private var isFilePickerPresented = false
@@ -77,9 +77,9 @@ struct ContentView: View {
     @State private var bufferSeconds: Double = 0
     @State private var confirmedSegments: [TranscriptionSegment] = []
     @State private var unconfirmedSegments: [TranscriptionSegment] = []
-
+    
     // MARK: Eager mode properties
-
+    
     @State private var eagerResults: [TranscriptionResult?] = []
     @State private var prevResult: TranscriptionResult?
     @State private var lastAgreedSeconds: Float = 0.0
@@ -89,9 +89,9 @@ struct ContentView: View {
     @State private var confirmedText: String = ""
     @State private var hypothesisWords: [WordTiming] = []
     @State private var hypothesisText: String = ""
-
+    
     // MARK: UI properties
-
+    
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var showComputeUnits: Bool = true
     @State private var showAdvancedOptions: Bool = false
@@ -99,29 +99,30 @@ struct ContentView: View {
     @State private var selectedCategoryId: MenuItem.ID?
     @State private var transcribeFileTask: Task<Void, Never>? = nil
     @State private var showLiveTranslationView: Bool = false
-
+    @State private var liveTranslationModel: LiveTranslationViewModel = .init()
+    
     struct MenuItem: Identifiable, Hashable {
         var id = UUID()
         var name: String
         var image: String
     }
-
+    
     private var menu = [
         MenuItem(name: "Transcribe", image: "book.pages"),
         MenuItem(name: "Stream", image: "waveform.badge.mic"),
     ]
-
-
+    
+    
     private var isStreamMode: Bool {
         self.selectedCategoryId == menu.first(where: { $0.name == "Stream" })?.id
     }
-
+    
     func getComputeOptions() -> ModelComputeOptions {
         return ModelComputeOptions(audioEncoderCompute: encoderComputeUnits, textDecoderCompute: decoderComputeUnits)
     }
-
+    
     // MARK: Views
-
+    
     func resetState() {
         transcribeFileTask?.cancel()
         isRecording = false
@@ -129,7 +130,7 @@ struct ContentView: View {
         whisperKit?.audioProcessor.stopRecording()
         currentText = ""
         currentChunks = [:]
-
+        
         pipelineStart = Double.greatestFiniteMagnitude
         firstTokenTime = Double.greatestFiniteMagnitude
         effectiveRealTimeFactor = 0
@@ -147,7 +148,7 @@ struct ContentView: View {
         bufferSeconds = 0
         confirmedSegments = []
         unconfirmedSegments = []
-
+        
         eagerResults = []
         prevResult = nil
         lastAgreedSeconds = 0.0
@@ -158,7 +159,7 @@ struct ContentView: View {
         hypothesisWords = []
         hypothesisText = ""
     }
-
+    
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
             VStack(alignment: .leading) {
@@ -167,7 +168,7 @@ struct ContentView: View {
                 computeUnitsView
                     .disabled(modelState != .loaded && modelState != .unloaded)
                     .padding(.bottom)
-
+                
                 List(menu, selection: $selectedCategoryId) { item in
                     HStack {
                         Image(systemName: item.image)
@@ -188,28 +189,28 @@ struct ContentView: View {
             Spacer()
         } detail: {
             VStack {
-                #if os(iOS)
+#if os(iOS)
                 modelSelectorView
                     .padding()
                 transcriptionView
-                #elseif os(macOS)
+#elseif os(macOS)
                 VStack(alignment: .leading) {
                     transcriptionView
                 }
                 .padding()
-                #endif
+#endif
                 controlsView
             }
             .toolbar(content: {
                 ToolbarItem {
                     Button {
                         let fullTranscript = formatSegments(confirmedSegments + unconfirmedSegments, withTimestamps: enableTimestamps).joined(separator: "\n")
-                        #if os(iOS)
+#if os(iOS)
                         UIPasteboard.general.string = fullTranscript
-                        #elseif os(macOS)
+#elseif os(macOS)
                         NSPasteboard.general.clearContents()
                         NSPasteboard.general.setString(fullTranscript, forType: .string)
-                        #endif
+#endif
                     } label: {
                         Label("Copy Text", systemImage: "doc.on.doc")
                     }
@@ -219,16 +220,41 @@ struct ContentView: View {
             })
         }
         .onAppear {
-            #if os(macOS)
+#if os(macOS)
             selectedCategoryId = menu.first(where: { $0.name == selectedTab })?.id
-            #endif
+#endif
             fetchModels()
+            openNewWindow()
+            
         }
-        .sheet(isPresented: $showLiveTranslationView) {
-            if #available(macOS 15.0, *) {
-                LiveTranslationView(englishText: unconfirmedSegments.map { $0.text }.last ?? "")
-            }
+//        .sheet(isPresented: $showLiveTranslationView) {
+//            if #available(macOS 15.0, *) {
+//                LiveTranslationView(englishText: unconfirmedSegments.map { $0.text }.last ?? "")
+//            }
+//        }
+        .onChange(of: unconfirmedSegments) { oldValue, newValue in
+            liveTranslationModel.englishText = unconfirmedSegments.map { $0.text }.last
         }
+    }
+    
+    func openNewWindow() {
+        let newWindow = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 800, height: 100),
+            styleMask: [.titled, .closable, .resizable, .miniaturizable],
+            backing: .buffered, defer: false)
+        
+        newWindow.title = "New Window"
+        newWindow.center()
+        newWindow.isOpaque = false
+        newWindow.backgroundColor = .clear
+        newWindow.titlebarAppearsTransparent = true
+        newWindow.titleVisibility = .hidden
+        newWindow.isReleasedWhenClosed = false
+        
+        let hostingController = NSHostingController(rootView: SubtitleOverlayWindow(liveTranslationModel: liveTranslationModel))
+        newWindow.contentView = hostingController.view
+        
+        newWindow.makeKeyAndOrderFront(nil)
     }
 
     // MARK: - Transcription
